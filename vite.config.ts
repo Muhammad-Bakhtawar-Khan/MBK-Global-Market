@@ -3,49 +3,6 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 
-
-
-// Vite config — https://vitejs.dev/config/
-export default defineConfig(({ mode }) => {
-  // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
-  const emitSourcemaps = mode === 'development'
-
-  return {
-    base: process.env.FIGMA_PUBLIC_URL ? `${process.env.FIGMA_PUBLIC_URL}/` : '/',
-    build: {
-      sourcemap: emitSourcemaps ? 'inline' : false,
-      minify: !emitSourcemaps,
-    },
-    plugins: [
-react(),
-      tailwindcss(),
-      figmaSiteConfiguration(siteConfiguration),
-      figmaErrorOverlayReplay(),
-      figmaReactRefreshBoundaryFallback(),
-      figmaMakeKitPlugin({ storiesGlob: '/src/**/*.stories.{ts,tsx,js,jsx}' }),
-    ],
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, './src'),
-      },
-    },
-    server: {
-      host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
-      port: parseInt(process.env.PORT || '8443'),
-      strictPort: true,
-      watch: {
-        ignored: [
-          '**/.figma/**',
-],
-      },
-    },
-    preview: {
-      host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
-      port: parseInt(process.env.PORT || '8443'),
-    },
-  }
-})
-
 type FigmaSiteConfiguration = {
   title?: string
   description?: string
@@ -73,40 +30,110 @@ type FigmaSiteConfiguration = {
   }
 }
 
-/** Applies /.figma/make/site.json to the generated document shell. */
-function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
-  function sanitizeHtmlValue(value: string | undefined): string {
+const siteConfiguration: FigmaSiteConfiguration = {
+  title: 'MBK Global',
+  description: 'MBK Global — Web, AI and Security',
+  language: 'en',
+  robots: { index: true },
+}
+
+export default defineConfig(({ mode }) => {
+  const emitSourcemaps = mode === 'development'
+
+  return {
+    base: process.env.FIGMA_PUBLIC_URL
+      ? `${process.env.FIGMA_PUBLIC_URL}/`
+      : '/',
+
+    build: {
+      sourcemap: emitSourcemaps ? 'inline' : false,
+      minify: !emitSourcemaps,
+    },
+
+    plugins: [
+      react(),
+      tailwindcss(),
+      figmaSiteConfigurationPlugin(siteConfiguration),
+      figmaErrorOverlayReplay(),
+      figmaReactRefreshBoundaryFallback(),
+      figmaMakeKitPlugin({
+        storiesGlob: '/src/**/*.stories.{ts,tsx,js,jsx}',
+      }),
+    ],
+
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
+    },
+
+    server: {
+      host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
+      port: parseInt(process.env.PORT || '8443'),
+      strictPort: true,
+      watch: {
+        ignored: ['**/.figma/**'],
+      },
+    },
+
+    preview: {
+      host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
+      port: parseInt(process.env.PORT || '8443'),
+    },
+  }
+})
+
+function figmaSiteConfigurationPlugin(
+  config: FigmaSiteConfiguration,
+): Plugin {
+  function sanitize(value: string | undefined): string {
     return value?.replace(/[^a-zA-Z0-9_-]/g, '') || ''
   }
-  function escapeHtmlText(value: string): string {
-    return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  }
-  function replaceHtmlCommentSlot(html: string, slotName: string, content: string): string {
-    return html.replace(`<!-- ${slotName} -->`, content)
+
+  function escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
   }
 
-  const title = config.title ?? "Figma Make App"
+  function replaceSlot(
+    html: string,
+    slot: string,
+    content: string,
+  ): string {
+    return html.replace(`<!-- ${slot} -->`, content)
+  }
+
+  const title = config.title ?? 'MBK Global'
   const description = config.description ?? ''
+  const language = sanitize(config.language) || 'en'
   const favicon = config.icons?.icon ?? ''
   const socialImage = config.openGraph?.image ?? ''
-  const language = sanitizeHtmlValue(config.language) || 'en'
-  const googleAnalyticsId = sanitizeHtmlValue(config.analytics?.googleAnalyticsId)
+  const analyticsId = sanitize(config.analytics?.googleAnalyticsId)
   const headStart = config.customScripts?.headStart ?? ''
   const headEnd = config.customScripts?.headEnd ?? ''
   const bodyStart = config.customScripts?.bodyStart ?? ''
   const bodyEnd = config.customScripts?.bodyEnd ?? ''
-  const robotsTxt = config.robots?.index === false ? 'User-agent: *\nDisallow: /\n' : ''
+  const robotsTxt =
+    config.robots?.index === false
+      ? 'User-agent: *\nDisallow: /\n'
+      : ''
 
   return {
     name: 'figma-site-configuration',
+
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (!robotsTxt || req.url?.split('?')[0] !== '/robots.txt') return next()
+        if (!robotsTxt || req.url?.split('?')[0] !== '/robots.txt') {
+          return next()
+        }
 
         res.setHeader('Content-Type', 'text/plain; charset=utf-8')
         res.end(robotsTxt)
       })
     },
+
     generateBundle() {
       if (!robotsTxt) return
 
@@ -116,58 +143,106 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
         source: robotsTxt,
       })
     },
+
     transformIndexHtml: {
       order: 'pre',
+
       handler(html) {
         let result = html
-        result = replaceHtmlCommentSlot(result, 'figma:lang', language)
-        result = replaceHtmlCommentSlot(result, 'figma:title', escapeHtmlText(title))
-        result = replaceHtmlCommentSlot(result, 'figma:head-start', headStart)
-        result = replaceHtmlCommentSlot(result, 'figma:head-end', headEnd)
-        result = replaceHtmlCommentSlot(result, 'figma:body-start', bodyStart)
-        result = replaceHtmlCommentSlot(result, 'figma:body-end', bodyEnd)
+
+        result = replaceSlot(result, 'figma:lang', language)
+        result = replaceSlot(result, 'figma:title', escapeHtml(title))
+        result = replaceSlot(result, 'figma:head-start', headStart)
+        result = replaceSlot(result, 'figma:head-end', headEnd)
+        result = replaceSlot(result, 'figma:body-start', bodyStart)
+        result = replaceSlot(result, 'figma:body-end', bodyEnd)
 
         const tags: HtmlTagDescriptor[] = []
+
         if (description) {
-          tags.push({ tag: 'meta', attrs: { name: 'description', content: description }, injectTo: 'head' })
+          tags.push({
+            tag: 'meta',
+            attrs: { name: 'description', content: description },
+            injectTo: 'head',
+          })
         }
+
         if (config.robots?.index === false) {
-          tags.push({ tag: 'meta', attrs: { name: 'robots', content: 'noindex, nofollow' }, injectTo: 'head' })
+          tags.push({
+            tag: 'meta',
+            attrs: {
+              name: 'robots',
+              content: 'noindex, nofollow',
+            },
+            injectTo: 'head',
+          })
         }
+
         if (favicon) {
-          tags.push({ tag: 'link', attrs: { rel: 'icon', href: favicon }, injectTo: 'head' })
+          tags.push({
+            tag: 'link',
+            attrs: { rel: 'icon', href: favicon },
+            injectTo: 'head',
+          })
         }
-        if (title) {
-          tags.push({ tag: 'meta', attrs: { property: 'og:title', content: title }, injectTo: 'head' })
-        }
+
+        tags.push({
+          tag: 'meta',
+          attrs: { property: 'og:title', content: title },
+          injectTo: 'head',
+        })
+
         if (description) {
-          tags.push({ tag: 'meta', attrs: { property: 'og:description', content: description }, injectTo: 'head' })
+          tags.push({
+            tag: 'meta',
+            attrs: {
+              property: 'og:description',
+              content: description,
+            },
+            injectTo: 'head',
+          })
         }
+
         if (socialImage) {
           tags.push(
-            { tag: 'meta', attrs: { property: 'og:image', content: socialImage }, injectTo: 'head' },
-            { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' }, injectTo: 'head' },
-            { tag: 'meta', attrs: { name: 'twitter:image', content: socialImage }, injectTo: 'head' },
+            {
+              tag: 'meta',
+              attrs: { property: 'og:image', content: socialImage },
+              injectTo: 'head',
+            },
+            {
+              tag: 'meta',
+              attrs: {
+                name: 'twitter:card',
+                content: 'summary_large_image',
+              },
+              injectTo: 'head',
+            },
+            {
+              tag: 'meta',
+              attrs: { name: 'twitter:image', content: socialImage },
+              injectTo: 'head',
+            },
           )
         }
 
-        if (googleAnalyticsId) {
+        if (analyticsId) {
           tags.push(
             {
               tag: 'script',
               attrs: {
                 async: true,
-                src: `https://www.googletagmanager.com/gtag/js?id=${googleAnalyticsId}`,
+                src: `https://www.googletagmanager.com/gtag/js?id=${analyticsId}`,
               },
               injectTo: 'head',
             },
             {
               tag: 'script',
               children: `
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', ${JSON.stringify(googleAnalyticsId)});
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', ${JSON.stringify(analyticsId)});
 `,
               injectTo: 'head',
             },
@@ -179,79 +254,71 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
             {
               tag: 'style',
               children: `
-  .figma-bypass-link {
-    position: fixed;
-    top: 8px;
-    left: 8px;
-    z-index: 2147483647;
-    transform: translateY(-150%);
-    border-radius: 6px;
-    background: #111827;
-    color: #fff;
-    padding: 8px 12px;
-    font: 600 14px/1.2 system-ui, sans-serif;
-    text-decoration: none;
-  }
-  .figma-bypass-link:focus {
-    transform: translateY(0);
-  }
+.figma-bypass-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 2147483647;
+  transform: translateY(-150%);
+  border-radius: 6px;
+  background: #111827;
+  color: #fff;
+  padding: 8px 12px;
+  font: 600 14px/1.2 system-ui, sans-serif;
+  text-decoration: none;
+}
+.figma-bypass-link:focus {
+  transform: translateY(0);
+}
 `,
               injectTo: 'head',
             },
             {
               tag: 'a',
-              attrs: { class: 'figma-bypass-link', href: '#root' },
+              attrs: {
+                class: 'figma-bypass-link',
+                href: '#root',
+              },
               children: 'Skip to content',
               injectTo: 'body-prepend',
             },
           )
         }
 
-        return {
-          html: result,
-          tags,
-        }
+        return { html: result, tags }
       },
     },
   }
 }
 
-/**
- * Replay the most recent build error to clients that connect after
- * it was first broadcast. Vite buffers an error payload only while
- * no clients are connected and clears the buffer on the first
- * reconnect (see `bufferedMessage` in `createWebSocketServer`), so
- * if the preview iframe reloads after Vite already delivered an
- * error to a live socket, the new socket misses the payload and
- * the overlay stays hidden even though the build is still broken.
- * We intercept `ws.send` to remember the latest error and replay
- * it on every new connection; the cache clears on a successful
- * `update` or `full-reload` so a stale overlay can't survive a
- * fixed build.
- */
 function figmaErrorOverlayReplay(): Plugin {
   return {
     name: 'figma-error-overlay-replay',
     apply: 'serve',
+
     configureServer(server) {
       let lastError: object | null = null
 
-      const origSend = server.ws.send.bind(server.ws) as (...args: any[]) => void
+      const originalSend = server.ws.send.bind(server.ws)
+
       server.ws.send = ((...args: any[]) => {
         const payload = args[0]
-        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+
+        if (payload && typeof payload === 'object') {
           const type = (payload as { type?: string }).type
+
           if (type === 'error') {
-            lastError = payload as object
+            lastError = payload
           } else if (type === 'update' || type === 'full-reload') {
             lastError = null
           }
         }
-        return origSend(...args)
+
+        return originalSend(...args)
       }) as typeof server.ws.send
 
       server.ws.on('connection', (socket) => {
-        if (lastError !== null) {
+        if (lastError) {
           socket.send(JSON.stringify(lastError))
         }
       })
@@ -259,38 +326,32 @@ function figmaErrorOverlayReplay(): Plugin {
   }
 }
 
-/**
- * Reload when a module that previously defined a React Refresh boundary stops
- * defining one. This happens when an agent moves a component into a new file
- * and replaces the old module with a re-export:
- *
- *   export { default } from './app/App'
- *
- * Vite otherwise accepts the update using the previous module's HMR boundary,
- * but the re-export-only transform no longer registers a replacement for the
- * mounted component family. React reports a successful refresh while leaving
- * the old tree mounted until the page is reloaded.
- */
 function figmaReactRefreshBoundaryFallback(): Plugin {
-  const hadRefreshBoundary = new Map<string, boolean>()
+  const boundaries = new Map<string, boolean>()
   let sendFullReload: (() => void) | null = null
 
   return {
     name: 'figma-react-refresh-boundary-fallback',
     apply: 'serve',
     enforce: 'post',
+
     configureServer(server) {
-      sendFullReload = () => server.ws.send({ type: 'full-reload', path: '*' })
+      sendFullReload = () =>
+        server.ws.send({ type: 'full-reload', path: '*' })
     },
+
     transform(code, id) {
-      if (!/\.[jt]sx?(?:\?|$)/.test(id) || id.includes('/node_modules/')) return null
+      if (!/\.[jt]sx?(?:\?|$)/.test(id) || id.includes('/node_modules/')) {
+        return null
+      }
 
       const moduleId = id.split('?')[0] ?? id
-      const hasRefreshBoundary = code.includes('registerExportsForReactRefresh')
-      const previousHadRefreshBoundary = hadRefreshBoundary.get(moduleId)
-      hadRefreshBoundary.set(moduleId, hasRefreshBoundary)
+      const hasBoundary = code.includes('registerExportsForReactRefresh')
+      const previous = boundaries.get(moduleId)
 
-      if (previousHadRefreshBoundary && !hasRefreshBoundary) {
+      boundaries.set(moduleId, hasBoundary)
+
+      if (previous && !hasBoundary) {
         queueMicrotask(() => sendFullReload?.())
       }
 
@@ -299,24 +360,20 @@ function figmaReactRefreshBoundaryFallback(): Plugin {
   }
 }
 
-/**
- * Serves a blank render-target page at /.figma/make/kit.html that
- * the Figma preview script drives directly. The page exposes a
- * registry of every file matching `storiesGlob` on
- * window.__FIGMA__.stories so the design surface can dynamically
- * import + mount each entry into its own grid view.
- *
- * Dev-only: `apply: 'serve'` gates the plugin to `vite dev`. Prod
- * builds (`vite build`) skip it entirely so the route doesn't leak
- * into shipped bundles.
- */
-function figmaMakeKitPlugin(options: { storiesGlob: string | string[] }): Plugin {
-  const storiesGlob = Array.isArray(options.storiesGlob) ? options.storiesGlob : [options.storiesGlob]
-  const ROUTE = '/.figma/make/kit.html'
-  const VIRTUAL_ID = 'virtual:figma-stories'
-  const RESOLVED_ID = '\0' + VIRTUAL_ID
-  const STORIES_MODULE = `export const stories = import.meta.glob(${JSON.stringify(storiesGlob)})`
-  const HTML_BOOTSTRAP = `<!doctype html>
+function figmaMakeKitPlugin(options: {
+  storiesGlob: string | string[]
+}): Plugin {
+  const storiesGlob = Array.isArray(options.storiesGlob)
+    ? options.storiesGlob
+    : [options.storiesGlob]
+
+  const route = '/.figma/make/kit.html'
+  const virtualId = 'virtual:figma-stories'
+  const resolvedId = '\0' + virtualId
+  const storiesModule =
+    `export const stories = import.meta.glob(${JSON.stringify(storiesGlob)})`
+
+  const bootstrap = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -335,26 +392,30 @@ function figmaMakeKitPlugin(options: { storiesGlob: string | string[] }): Plugin
   return {
     name: 'figma-make-kit',
     apply: 'serve',
+
     resolveId(id) {
-      if (id === VIRTUAL_ID) return RESOLVED_ID
+      if (id === virtualId) return resolvedId
       return null
     },
+
     load(id) {
-      if (id !== RESOLVED_ID) return null
-      return STORIES_MODULE
+      if (id === resolvedId) return storiesModule
+      return null
     },
+
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url || ''
-        if (url.split('?')[0] !== ROUTE) return next()
+
+        if (url.split('?')[0] !== route) return next()
 
         try {
           res.setHeader('Content-Type', 'text/html')
-          res.end(await server.transformIndexHtml(url, HTML_BOOTSTRAP))
-        } catch (err) {
-          next(err as Error)
+          res.end(await server.transformIndexHtml(url, bootstrap))
+        } catch (error) {
+          next(error as Error)
         }
       })
     },
   }
-}
+                }
